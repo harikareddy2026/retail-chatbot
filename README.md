@@ -349,11 +349,6 @@ and agent reasoning expander for debugging.
 
 ---
 
-## Built by
-
-**Harika Mutukuru** — Data Engineer transitioning to AI Engineer
-
-Walmart · Cary, NC ·
 [LinkedIn](https://linkedin.com/in/harika-mutukuru) ·
 [GitHub](https://github.com/harikareddy2026)
 
