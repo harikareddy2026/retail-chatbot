@@ -34,16 +34,16 @@ and production deployment.
 
 ## Live metrics
 
-| Metric | Score | Notes |
-|---|---|---|
-| Routing accuracy | **100%** (20/20) | All 4 worker types tested |
-| Answer relevancy | **1.000** | Embedding cosine similarity |
-| Faithfulness | **0.722** | Keyword routing baseline |
-| Test questions | **20** | RAG · action · data · escalation · injection |
-| MLflow runs | **8+** | Full experiment history tracked |
-| Workers | **4** | RAG / action / data / escalation |
-| MCP servers | **3** | Inventory · orders · pricing |
-| Embedding dims | **384** | all-MiniLM-L6-v2, local, zero API cost |
+| Metric           | Score            | Notes                                        |
+| ---------------- | ---------------- | -------------------------------------------- |
+| Routing accuracy | **100%** (20/20) | All 4 worker types tested                    |
+| Answer relevancy | **1.000**        | Embedding cosine similarity                  |
+| Faithfulness     | **0.722**        | Keyword routing baseline                     |
+| Test questions   | **20**           | RAG · action · data · escalation · injection |
+| MLflow runs      | **8+**           | Full experiment history tracked              |
+| Workers          | **4**            | RAG / action / data / escalation             |
+| MCP servers      | **3**            | Inventory · orders · pricing                 |
+| Embedding dims   | **384**          | all-MiniLM-L6-v2, local, zero API cost       |
 
 > **Faithfulness note:** 0.722 baseline reflects keyword routing fallback
 > (AWS Bedrock blocked by org SCP). Expected to reach 0.85+ with
@@ -53,74 +53,54 @@ and production deployment.
 
 ## Architecture
 
-```
-CSV files (products · merchants · orders)
-         │
-         ▼
-PySpark ETL — Google Colab
-    ├── Bronze Delta (raw, append-only)             → S3
-    ├── Silver Delta (cleaned, typed)               → S3
-    └── Gold Delta  (1000-char chunks, 200 overlap) → S3
-         │
-         ▼
-all-MiniLM-L6-v2 local embeddings (384-dim, no API cost)
-         │
-         ▼
-Supabase pgvector
-    ├── HNSW index (m=16, ef_construction=128, ef_search=100)
-    ├── Merchant isolation: WHERE merchant_id = %s
-    └── user_merchant_map: server-side auth (never trust client)
-         │
-         ▼
-LangGraph StateGraph
-    ├── classifier_node  → blocks injections + off-topic queries
-    ├── supervisor_node  → keyword routing to correct worker
-    │        │               │               │            │
-    │    rag_worker   action_worker    data_worker   escalation
-    │    pgvector     MCP servers      SQL direct    fallback
-    │    search       (3 FastAPI)      analytics
-    └── MemorySaver checkpointer → conversation persistence
-         │
-         ▼
-MLflow autolog
-    ├── Traces (tool name · latency · routing decision)
-    ├── Metrics (faithfulness · relevancy · routing accuracy)
-    └── Model Registry (retail-merchant-chatbot v1)
-         │
-         ▼
-Streamlit UI
-    ├── Server-side merchant auth (user_merchant_map lookup)
-    ├── st.spinner (agent thinking indicator)
-    └── Agent reasoning expander (worker · merchant · blocked flag)
+```mermaid
+flowchart TD
+    A[CSV files\nproducts · merchants · orders] --> B[PySpark ETL\nGoogle Colab]
+    B --> C[(AWS S3\nBronze Delta · Silver Delta · Gold Delta\n1000-char chunks · 200 overlap)]
+    C --> D[all-MiniLM-L6-v2\n384-dim local embeddings]
+    D --> E[(Supabase pgvector\nHNSW m=16 · ef=100\nmerchant isolation)]
+    E --> F{LangGraph StateGraph}
+    F --> G[classifier_node\nblocks injections]
+    G --> H[supervisor_node\nkeyword routing]
+    H --> I[rag_worker\npgvector search]
+    H --> J[action_worker\n3 FastAPI MCP servers]
+    H --> K[data_worker\nSQL analytics]
+    H --> L[escalation\nfallback]
+    I --> M[MLflow autolog\ntraces · metrics · registry]
+    J --> M
+    K --> M
+    L --> M
+    M --> N[Streamlit UI\nserver-side auth · reasoning expander]
 ```
 
 ---
 
 ## Tech stack
 
-| Layer | Technology | Decision rationale |
-|---|---|---|
-| Data pipeline | PySpark 3.5.3 + Delta Lake | ACID transactions, time travel, schema evolution |
-| Storage | AWS S3 (Bronze/Silver/Gold) | Scalable, durable, Delta-compatible |
-| Vector DB | Supabase pgvector (HNSW) | Colocation with transactional data, no extra service |
-| Embeddings | all-MiniLM-L6-v2 (384-dim) | Local, free, no AWS API dependency |
-| Agent framework | LangGraph StateGraph | Full control over graph structure and state schema |
-| Persistence | MemorySaver (→ AsyncPostgresSaver) | Session state across conversation turns |
-| Live data | 3 async FastAPI MCP servers | Clean separation of concerns, independent scaling |
-| Connection pool | asyncpg (min=2, max=10) | Warm connections, stays under Supabase limit |
-| Auth | psycopg2 + user_merchant_map | Server-side only — client never controls merchant_id |
-| Rate limiting | slowapi 30 req/min | Protects against agent runaway loops |
-| Retry | tenacity (3 attempts, exponential) | Handles MCP server restarts transparently |
-| Observability | MLflow autolog + traces | Every routing decision tracked, PII protected |
-| Evaluation | RAGAS (embedding similarity) | Faithfulness + relevancy + routing accuracy |
-| UI | Streamlit + session_state | Rapid prototyping, agent reasoning expander |
-| Containerisation | Docker + docker-compose | One command starts all 4 services |
+| Layer            | Technology                         | Decision rationale                                   |
+| ---------------- | ---------------------------------- | ---------------------------------------------------- |
+| Data pipeline    | PySpark 3.5.3 + Delta Lake         | ACID transactions, time travel, schema evolution     |
+| Storage          | AWS S3 (Bronze/Silver/Gold)        | Scalable, durable, Delta-compatible                  |
+| Vector DB        | Supabase pgvector (HNSW)           | Colocation with transactional data, no extra service |
+| Embeddings       | all-MiniLM-L6-v2 (384-dim)         | Local, free, no AWS API dependency                   |
+| Agent framework  | LangGraph StateGraph               | Full control over graph structure and state schema   |
+| Persistence      | MemorySaver (→ AsyncPostgresSaver) | Session state across conversation turns              |
+| Live data        | 3 async FastAPI MCP servers        | Clean separation of concerns, independent scaling    |
+| Connection pool  | asyncpg (min=2, max=10)            | Warm connections, stays under Supabase limit         |
+| Auth             | psycopg2 + user_merchant_map       | Server-side only — client never controls merchant_id |
+| Rate limiting    | slowapi 30 req/min                 | Protects against agent runaway loops                 |
+| Retry            | tenacity (3 attempts, exponential) | Handles MCP server restarts transparently            |
+| Observability    | MLflow autolog + traces            | Every routing decision tracked, PII protected        |
+| Evaluation       | RAGAS (embedding similarity)       | Faithfulness + relevancy + routing accuracy          |
+| UI               | Streamlit + session_state          | Rapid prototyping, agent reasoning expander          |
+| Containerisation | Docker + docker-compose            | One command starts all 4 services                    |
 
 ---
 
 ## 4 Architect decisions
 
 ### 1 — Native Postgres role over OAuth tokens
+
 Databricks OAuth tokens expire after 1 hour. In a long agent session
 this causes silent mid-conversation authentication failures — the pool
 reconnects but fails auth, and the user sees a confusing service error.
@@ -129,6 +109,7 @@ A native Postgres role with static password stored in AWS Secrets Manager
 never expires. The asyncpg pool stays healthy for the lifetime of the process.
 
 ### 2 — Server-side merchant_id from user_merchant_map
+
 After login, the server queries `user_merchant_map WHERE email = ?`
 and stores the result in session state. The client never supplies
 merchant_id and the server ignores any client-side value entirely.
@@ -139,6 +120,7 @@ the server uses the database-verified M001 value. Combined with the
 two independent layers of merchant isolation.
 
 ### 3 — statement_cache_size=0 for Supabase PgBouncer
+
 Supabase runs PgBouncer in transaction mode. PgBouncer routes each
 transaction to a different underlying database connection. asyncpg
 prepared statements are connection-specific — the second request
@@ -148,6 +130,7 @@ Setting `statement_cache_size=0` tells asyncpg to send plain text
 queries every time. Eliminates the PgBouncer incompatibility entirely.
 
 ### 4 — data_worker keyword check before action_worker
+
 "How many orders do I have?" contains the word "order" which matches
 both the action_worker and data_worker keyword lists. Without ordering,
 analytics queries route to the action worker which returns raw order
@@ -160,18 +143,18 @@ breakdown) before action_worker keywords improved routing from 80% to 100%.
 
 ## Key numbers
 
-| Parameter | Value | Why this value |
-|---|---|---|
-| Chunk size | 1000 chars | Balances retrieval precision vs LLM context window |
-| Chunk overlap | 200 chars (20%) | Prevents boundary sentence loss |
-| Embedding dims | 384 | Local model, no API dependency |
-| HNSW m | 16 | Standard for under 1M vectors, good recall |
-| ef_construction | 128 | 2× default — better graph quality at build time |
-| ef_search | 100 | Tunable at query time without index rebuild |
-| Rate limit | 30 req/min | Covers recursion_limit=10 × 3 concurrent sessions |
-| Pool min/max | 2/10 | Warm connections, stays under Supabase connection limit |
-| Recursion limit | 10 | Prevents infinite supervisor loops |
-| pgvector sufficient | <1M vectors | Switch to Pinecone above 10M vectors |
+| Parameter           | Value           | Why this value                                          |
+| ------------------- | --------------- | ------------------------------------------------------- |
+| Chunk size          | 1000 chars      | Balances retrieval precision vs LLM context window      |
+| Chunk overlap       | 200 chars (20%) | Prevents boundary sentence loss                         |
+| Embedding dims      | 384             | Local model, no API dependency                          |
+| HNSW m              | 16              | Standard for under 1M vectors, good recall              |
+| ef_construction     | 128             | 2× default — better graph quality at build time         |
+| ef_search           | 100             | Tunable at query time without index rebuild             |
+| Rate limit          | 30 req/min      | Covers recursion_limit=10 × 3 concurrent sessions       |
+| Pool min/max        | 2/10            | Warm connections, stays under Supabase connection limit |
+| Recursion limit     | 10              | Prevents infinite supervisor loops                      |
+| pgvector sufficient | <1M vectors     | Switch to Pinecone above 10M vectors                    |
 
 ---
 
@@ -292,14 +275,14 @@ mlflow ui --port 5001 --backend-store-uri sqlite:///mlflow.db
 # Open http://127.0.0.1:5001
 ```
 
-| Run name | Day | Key metrics |
-|---|---|---|
-| day1_ingest | 1 | silver_products: 200, silver_orders: 200 |
-| day2_embeddings | 2 | embeddings_stored: 450+, cost_usd: 0.0 |
-| day4_tools | 4 | tools_passing: 4 |
-| day5_smoke_test | 5 | all_tools_passing: 1.0 |
-| day7_routing_test | 7 | routing_accuracy: 1.0 |
-| day8_ragas_eval | 8 | faithfulness: 0.722, answer_relevancy: 1.000 |
+| Run name          | Day | Key metrics                                  |
+| ----------------- | --- | -------------------------------------------- |
+| day1_ingest       | 1   | silver_products: 200, silver_orders: 200     |
+| day2_embeddings   | 2   | embeddings_stored: 450+, cost_usd: 0.0       |
+| day4_tools        | 4   | tools_passing: 4                             |
+| day5_smoke_test   | 5   | all_tools_passing: 1.0                       |
+| day7_routing_test | 7   | routing_accuracy: 1.0                        |
+| day8_ragas_eval   | 8   | faithfulness: 0.722, answer_relevancy: 1.000 |
 
 ---
 
