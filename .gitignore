@@ -1,0 +1,13 @@
+.env
+mlflow.db
+mlruns/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.csv
+*.log
+venv/
+.venv/
+*.ipynb
+.ipynb_checkpoints/
