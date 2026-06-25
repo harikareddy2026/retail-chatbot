@@ -1,3 +1,5 @@
+qx
+
 # Retail Merchant AI Chatbot
 
 ### Production-grade agentic RAG system for multi-tenant retail merchants
@@ -53,78 +55,12 @@ and production deployment.
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    classDef source fill:#444441,stroke:none,color:#F1EFE8
-    classDef etl fill:#E25A1C,stroke:none,color:#fff
-    classDef bronze fill:#D4A017,stroke:#EF9F27,color:#2C2C2A
-    classDef silver fill:#9E9E9E,stroke:#BDBDBD,color:#fff
-    classDef gold fill:#B8860B,stroke:none,color:#FFF8DC
-    classDef embed fill:#0F6E56,stroke:none,color:#E1F5EE
-    classDef vector fill:#185FA5,stroke:none,color:#E6F1FB
-    classDef security fill:#D85A30,stroke:none,color:#FAECE7
-    classDef agent fill:#3C3489,stroke:none,color:#EEEDFE
-    classDef supervisor fill:#534AB7,stroke:none,color:#EEEDFE
-    classDef rag fill:#0F6E56,stroke:none,color:#E1F5EE
-    classDef action fill:#185FA5,stroke:none,color:#E6F1FB
-    classDef data fill:#854F0B,stroke:none,color:#FAEEDA
-    classDef escalation fill:#5F5E5A,stroke:none,color:#F1EFE8
-    classDef mcp fill:#00695C,stroke:none,color:#E1F5EE
-    classDef ui fill:#C62828,stroke:none,color:#fff
-    classDef mlflow fill:#854F0B,stroke:none,color:#FAEEDA
-    classDef docker fill:#1565C0,stroke:none,color:#E6F1FB
+![Retail Merchant AI Chatbot — Production Pipeline Architecture](docs/architecture.png)
 
-    subgraph INGESTION["📥  Data ingestion"]
-        P["products.csv\n200 rows"]:::source
-        M["merchants.csv\n3 rows"]:::source
-        O["orders.csv\n200 rows"]:::source
-        ETL["⚡ PySpark ETL\nGoogle Colab · 3.5.3"]:::etl
-    end
-
-    subgraph STORAGE["🗄️  Storage — AWS S3"]
-        B["🥉 Bronze Delta\nraw · append-only"]:::bronze
-        S["🥈 Silver Delta\ncleaned · typed"]:::silver
-        G["🥇 Gold Delta\n1000-char chunks · 200 overlap"]:::gold
-    end
-
-    subgraph INTELLIGENCE["🧠  Intelligence"]
-        E["all-MiniLM-L6-v2\n384-dim · local · zero cost"]:::embed
-        V["Supabase pgvector\nHNSW m=16 · ef_search=100"]:::vector
-        SEC["🔒 Merchant isolation\nWHERE merchant_id · user_merchant_map"]:::security
-
-        subgraph AGENT["LangGraph StateGraph"]
-            CL["classifier\ninjection block · limit=10"]:::agent
-            SV["supervisor\nkeyword routing"]:::supervisor
-            RW["rag\nworker"]:::rag
-            AW["action\nworker"]:::action
-            DW["data\nworker"]:::data
-            EW["escalation\nfallback"]:::escalation
-        end
-    end
-
-    subgraph SERVING["🚀  Serving"]
-        MCP1["inventory MCP\nport 8001"]:::mcp
-        MCP2["orders MCP\nport 8002"]:::mcp
-        MCP3["pricing MCP\nport 8003"]:::mcp
-        UI["Streamlit UI\nserver-side auth · port 8501"]:::ui
-    end
-
-    subgraph OBS["📊  Observability"]
-        ML["MLflow\nautolog · RAGAS · registry v1"]:::mlflow
-        DK["Docker\ndocker-compose up · health checks"]:::docker
-    end
-
-    P & M & O --> ETL
-    ETL --> B --> S --> G
-    G --> E --> V --> SEC
-    V -.->|pgvector search| RW
-    SEC --> CL --> SV
-    SV --> RW & AW & DW & EW
-    AW --> MCP1 & MCP2 & MCP3
-    RW & AW & DW & EW --> UI
-    RW & AW & DW --> ML
-    UI & MCP1 & MCP2 & MCP3 --> DK
-```
+> 5-layer production pipeline: Data ingestion → Delta Lake (Bronze/Silver/Gold on S3)
+> → Intelligence (all-MiniLM-L6-v2 + Supabase pgvector + LangGraph agent with 6 workers)
+> → Serving (3 FastAPI MCP servers + Streamlit UI)
+> → Observability (MLflow · RAGAS · Docker · conda)
 
 ---
 
